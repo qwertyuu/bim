@@ -62,38 +62,47 @@ class Box2D {
             this.top() <= other.bottom() && this.bottom() >= other.top();
     }
 
-    getCollisionSides(other) {
-        let sides = 0;
-        if (this.left() <= other.left() || this.right() >= other.right()) {
-            sides += 1;
+    static get1DCollision(firstPos, firstWidth, secondPos, secondWidth) {
+        const firstRight = firstPos + firstWidth;
+        const secondRight = secondPos + secondWidth;
+        //L2 < L1 && R2 > R1 --- x: L1, W: W1
+        if (secondPos < firstPos && secondRight > firstRight) {
+            return {
+                pos: firstPos,
+                width: firstWidth,
+            };
         }
-        if (this.top() <= other.top() || this.bottom() >= other.bottom()) {
-            sides += 2;
+
+        //2 < 1 --- x: L1, W: R2 - L1
+        if (secondPos < firstPos && secondRight < firstRight) {
+            return {
+                pos: firstPos,
+                width: secondRight - firstPos,
+            };
         }
-        return sides;
+
+        //2 > 1 --- x: L2, W: R1 - L2
+        if (secondPos > firstPos && secondRight > firstRight) {
+            return {
+                pos: secondPos,
+                width: firstRight - secondPos,
+            };
+        }
+
+        // --- x: L2, W: W2
+        return {
+            pos: secondPos,
+            width: secondWidth,
+        };
     }
 
     getCollisionBox(other) {
-        let W;
-        let x;
-        if (this.right() > other.right()) {
-            W = other.right() - this.left();
-            x = other.pos.x + (other.size.x - W);
-        } else {
-            W = this.right() - other.left();
-            x = this.pos.x + (this.size.x - W);
-        }
-
-        let H;
-        let y;
-        if (this.bottom() > other.bottom()) {
-            H = other.bottom() - this.top();
-            y = other.pos.y + (other.size.y - H);
-        } else {
-            H = this.bottom() - other.top();
-            y = this.pos.y + (this.size.y - H);
-        }
-        return new Box2D(new Vector(W, H), new Vector(x, y));
+        const horizontalCollision = Box2D.get1DCollision(this.left(), this.size.x, other.left(), other.size.x);
+        const verticalCollision = Box2D.get1DCollision(this.top(), this.size.y, other.top(), other.size.y);
+        return new Box2D(
+            new Vector(horizontalCollision.width, verticalCollision.width),
+            new Vector(horizontalCollision.pos, verticalCollision.pos)
+        );
     }
 }
 
@@ -124,12 +133,43 @@ class Palett extends ElBox2D {
 }
 
 class Ball extends ElBox2D {
-    constructor(el) {
+    constructor(el, collidables) {
         super(el);
-        this.movement = new Vector(20, 20);
+        this.movement = new Vector(50, 50);
+        this.collidables = collidables;
     }
 
     update(deltaTime) {
+        this.collidables.forEach((collidable) => {
+            if (this.collides(collidable)) {
+
+                const collisionBox = this.getCollisionBox(collidable);
+                if (collisionBox.left() > this.left() || collisionBox.right() > this.right()) { // collision is on right
+                    this.pos.x -= collisionBox.size.x; // move left
+                    this.movement.x *= -1;
+                } else if (collisionBox.left() < this.left() || collisionBox.right() < this.right()) { // collision is on left
+                    this.pos.x += collisionBox.size.x; // move right
+                    this.movement.x *= -1;
+                }
+
+                let verticalCollision = false;
+                if (collisionBox.top() > this.top() || collisionBox.bottom() > this.bottom()) { // collision is on bottom
+                    this.pos.y -= collisionBox.size.y; // move upwards
+                    verticalCollision = true;
+                } else if (collisionBox.top() < this.top() || collisionBox.bottom() < this.bottom()) { // collision is on top
+                    this.pos.y += collisionBox.size.y; // move downwards
+                    verticalCollision = true;
+                }
+                if (verticalCollision) {
+                    this.movement.y *= -1;
+                    if (collidable instanceof Palett) {
+                        const beforeVelocity = this.movement.velocity();
+                        this.movement.x = (this.pos.x - collidable.centerX()) / 3;
+                        this.movement = this.movement.toVelocity(beforeVelocity);
+                    }
+                }
+            }
+        });
         this.pos = this.pos.add(this.movement.scalarMult(deltaTime));
         this._updateEl();
     }
