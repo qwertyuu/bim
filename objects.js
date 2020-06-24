@@ -27,7 +27,10 @@ class Box2D {
         this.size = size;
         this.halfWidth = this.size.x / 2;
         this.halfHeight = this.size.y / 2;
+        this.enabled = true;
     }
+
+    collidedWith() {}
 
     bottom() {
         return this.pos.y + this.size.y;
@@ -49,56 +52,51 @@ class Box2D {
         return this.pos.x + this.halfWidth;
     }
 
-    centerY() {
-        return this.pos.y + this.halfHeight;
-    }
-
-    center() {
-        return new Vector(this.centerX(), this.centerY());
-    }
-
     collides(other) {
+        if (!this.enabled || !other.enabled) {
+            return false;
+        }
         return this.left() <= other.right() && this.right() >= other.left() &&
             this.top() <= other.bottom() && this.bottom() >= other.top();
     }
 
-    static get1DCollision(firstPos, firstWidth, secondPos, secondWidth) {
+    static get1DCollisionZone(firstPos, firstWidth, secondPos, secondWidth) {
         const firstRight = firstPos + firstWidth;
         const secondRight = secondPos + secondWidth;
-        //L2 < L1 && R2 > R1 --- x: L1, W: W1
-        if (secondPos < firstPos && secondRight > firstRight) {
-            return {
-                pos: firstPos,
-                width: firstWidth,
-            };
+        if (secondPos < firstPos) {
+            //L2 < L1 && R2 > R1 --- x: L1, W: W1
+            if (secondRight > firstRight) {
+                return {
+                    pos: firstPos,
+                    width: firstWidth,
+                };
+            } else {
+                //2 < 1 --- x: L1, W: R2 - L1
+                return {
+                    pos: firstPos,
+                    width: secondRight - firstPos,
+                };
+            }
+        } else {
+            //2 > 1 --- x: L2, W: R1 - L2
+            if (secondRight > firstRight) {
+                return {
+                    pos: secondPos,
+                    width: firstRight - secondPos,
+                };
+            } else {
+                // --- x: L2, W: W2
+                return {
+                    pos: secondPos,
+                    width: secondWidth,
+                };
+            }
         }
-
-        //2 < 1 --- x: L1, W: R2 - L1
-        if (secondPos < firstPos && secondRight < firstRight) {
-            return {
-                pos: firstPos,
-                width: secondRight - firstPos,
-            };
-        }
-
-        //2 > 1 --- x: L2, W: R1 - L2
-        if (secondPos > firstPos && secondRight > firstRight) {
-            return {
-                pos: secondPos,
-                width: firstRight - secondPos,
-            };
-        }
-
-        // --- x: L2, W: W2
-        return {
-            pos: secondPos,
-            width: secondWidth,
-        };
     }
 
     getCollisionBox(other) {
-        const horizontalCollision = Box2D.get1DCollision(this.left(), this.size.x, other.left(), other.size.x);
-        const verticalCollision = Box2D.get1DCollision(this.top(), this.size.y, other.top(), other.size.y);
+        const horizontalCollision = Box2D.get1DCollisionZone(this.left(), this.size.x, other.left(), other.size.x);
+        const verticalCollision = Box2D.get1DCollisionZone(this.top(), this.size.y, other.top(), other.size.y);
         return new Box2D(
             new Vector(horizontalCollision.width, verticalCollision.width),
             new Vector(horizontalCollision.pos, verticalCollision.pos)
@@ -116,41 +114,48 @@ class ElBox2D extends Box2D {
     }
 
     _updateEl() {
+        if (!this.enabled) {
+            this.el.style.setProperty('display', 'none');
+            return;
+        }
         this.el.style.left = this.pos.x + 'px';
         this.el.style.top = this.pos.y + 'px';
     }
 }
 
 class Palett extends ElBox2D {
-    constructor(el) {
-        super(el);
-    }
-
     setPosition(x) {
         this.pos.x = x - this.halfWidth;
         this._updateEl();
     }
 }
 
+class Brick extends ElBox2D {
+    collidedWith(collider) {
+        if (collider instanceof Ball) {
+            this.enabled = false;
+            this._updateEl();
+        }
+    }
+}
+
 class Ball extends ElBox2D {
     constructor(el, collidables) {
         super(el);
-        this.movement = new Vector(50, 50);
+        this.movement = new Vector(0, 70);
+        this.velocity = this.movement.velocity();
         this.collidables = collidables;
     }
 
     update(deltaTime) {
+        let verticalCollisions = 0;
+        let collidedPalletts = [];
+        let horizontalCollisions = 0;
         this.collidables.forEach((collidable) => {
             if (this.collides(collidable)) {
+                collidable.collidedWith(this);
 
                 const collisionBox = this.getCollisionBox(collidable);
-                if (collisionBox.left() > this.left() || collisionBox.right() > this.right()) { // collision is on right
-                    this.pos.x -= collisionBox.size.x; // move left
-                    this.movement.x *= -1;
-                } else if (collisionBox.left() < this.left() || collisionBox.right() < this.right()) { // collision is on left
-                    this.pos.x += collisionBox.size.x; // move right
-                    this.movement.x *= -1;
-                }
 
                 let verticalCollision = false;
                 if (collisionBox.top() > this.top() || collisionBox.bottom() > this.bottom()) { // collision is on bottom
@@ -161,15 +166,35 @@ class Ball extends ElBox2D {
                     verticalCollision = true;
                 }
                 if (verticalCollision) {
-                    this.movement.y *= -1;
+                    verticalCollisions++;
                     if (collidable instanceof Palett) {
-                        const beforeVelocity = this.movement.velocity();
-                        this.movement.x = (this.pos.x - collidable.centerX()) / 3;
-                        this.movement = this.movement.toVelocity(beforeVelocity);
+                        collidedPalletts.push(collidable);
                     }
+                }
+
+                if (collisionBox.left() > this.left() || collisionBox.right() > this.right()) { // collision is on right
+                    if (!verticalCollision) {
+                        this.pos.x -= collisionBox.size.x; // move left
+                    }
+                    horizontalCollisions++;
+                } else if (collisionBox.left() < this.left() || collisionBox.right() < this.right()) { // collision is on left
+                    if (!verticalCollision) {
+                        this.pos.x += collisionBox.size.x; // move right
+                    }
+                    horizontalCollisions++;
                 }
             }
         });
+        if (verticalCollisions) {
+            this.movement.y *= -1;
+            if (collidedPalletts.length) {
+                this.movement.x = (this.pos.x - collidedPalletts[0].centerX()) / 3;
+                this.movement = this.movement.toVelocity(this.velocity);
+            }
+        }
+        if (horizontalCollisions) {
+            this.movement.x *= -1;
+        }
         this.pos = this.pos.add(this.movement.scalarMult(deltaTime));
         this._updateEl();
     }
