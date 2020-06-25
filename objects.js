@@ -26,7 +26,6 @@ class Box2D {
         this.pos = pos;
         this.size = size;
         this.halfWidth = this.size.x / 2;
-        this.halfHeight = this.size.y / 2;
         this.enabled = true;
     }
 
@@ -192,7 +191,7 @@ class Ball extends ElBox2D {
                 this.movement = this.movement.toVelocity(this.velocity);
             }
         }
-        if (horizontalCollisions) {
+        if (horizontalCollisions && !verticalCollisions) {
             this.movement.x *= -1;
         }
         this.pos = this.pos.add(this.movement.scalarMult(deltaTime));
